@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Position Repair — Project Zomboid</title>
+<style>
+  :root {
+    --bg: #120f17;
+    --panel: #1b1622;
+    --panel-alt: #221a2b;
+    --border: #35293f;
+    --border-soft: #2a2032;
+    --text: #ece7f2;
+    --text-dim: #a99cb8;
+    --text-faint: #746685;
+    --accent: #9b5de5;
+    --accent-dim: #6b3fa0;
+    --accent-glow: rgba(155, 93, 229, 0.25);
+    --ok: #6fcf7d;
+    --bad: #e2574c;
+    --bad-bg: rgba(226, 87, 76, 0.12);
+    --ok-bg: rgba(111, 207, 125, 0.10);
+    --fixed-bg: rgba(155, 93, 229, 0.14);
+    --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    margin: 0;
+    padding: 48px 20px 80px;
+    line-height: 1.5;
+  }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 15px;
+    margin: 0 0 4px;
+    max-width: 62ch;
+  }
+
+  .privacy-note {
+    color: var(--text-faint);
+    font-size: 13px;
+    margin: 12px 0 32px;
+    padding-left: 14px;
+    border-left: 2px solid var(--border);
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  /* Dropzone */
+  #dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    padding: 40px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  #dropzone:hover, #dropzone.drag-over {
+    border-color: var(--accent);
+    background: var(--panel-alt);
+  }
+
+  #dropzone .icon {
+    font-family: var(--mono);
+    font-size: 28px;
+    color: var(--text-faint);
+    margin-bottom: 10px;
+  }
+
+  #dropzone .main-line {
+    font-size: 15px;
+    color: var(--text);
+  }
+
+  #dropzone .sub-line {
+    font-size: 13px;
+    color: var(--text-faint);
+    margin-top: 4px;
+  }
+
+  #file-input { display: none; }
+
+  /* Summary line */
+  #summary {
+    display: none;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+  }
+
+  #summary strong { color: var(--text); }
+
+  #summary .n-bad { color: var(--bad); }
+  #summary .n-ok { color: var(--ok); }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  thead th {
+    text-align: left;
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 12.5px;
+    color: var(--text-faint);
+    padding: 0 10px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody tr.row-main td {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: middle;
+  }
+
+  tbody tr.row-main:last-child td {
+    border-bottom: none;
+  }
+
+  td.col-name {
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+
+  .table-tag {
+    display: block;
+    font-family: var(--sans);
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 2px;
+  }
+
+  td.col-coords {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.bad { background: var(--bad-bg); color: var(--bad); }
+  .badge.fixed { background: var(--fixed-bg); color: var(--accent); }
+
+  .btn {
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--accent-dim);
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+
+  .btn:hover { background: var(--accent-glow); border-color: var(--accent); }
+
+  .btn.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  .btn.primary:hover { background: #8548d6; }
+
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Inline repair form */
+  tr.row-fix td {
+    padding: 0 10px 16px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .fix-box {
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+  }
+
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-faint);
+    margin-bottom: 5px;
+  }
+
+  select, input[type="number"] {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 9px;
+  }
+
+  select:focus, input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+
+  select { min-width: 220px; }
+  input[type="number"] { width: 110px; }
+
+  .custom-coords {
+    display: none;
+    gap: 12px;
+  }
+
+  .custom-coords.visible { display: flex; }
+
+  /* Download bar */
+  #download-bar {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 4px;
+  }
+
+  #download-bar .msg {
+    font-size: 13.5px;
+    color: var(--text-dim);
+  }
+
+  /* Empty / error states */
+  .state-msg {
+    display: none;
+    font-size: 14px;
+    padding: 14px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+  }
+
+  .state-msg.error { background: var(--bad-bg); color: var(--bad); }
+  .state-msg.success { background: var(--ok-bg); color: var(--ok); }
+
+  /* How it works */
+  details {
+    margin-top: 8px;
+  }
+
+  summary {
+    cursor: pointer;
+    font-size: 13.5px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  details p {
+    font-size: 13.5px;
+    color: var(--text-dim);
+    margin: 10px 0;
+  }
+
+  code {
+    font-family: var(--mono);
+    background: var(--panel-alt);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12.5px;
+  }
+
+  #results-panel { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Position Repair</h1>
+  <p class="subtitle">Fixes the corrupted-position bug that causes a black screen and endless "loading the world" — or a vehicle that's vanished from the map — after a vehicle or trailer glitch in Project Zomboid.</p>
+  <div class="privacy-note">Runs entirely in your browser. Your save file is read locally and never sent anywhere — this page works fine with no internet connection once it's loaded.</div>
+
+  <div class="panel">
+    <div id="dropzone">
+      <div class="icon">↥</div>
+      <div class="main-line">Drop your <code>players.db</code> or <code>vehicles.db</code> here, or click to choose a file</div>
+      <div class="sub-line">Usually found in your server's Zomboid/Saves/Multiplayer folder</div>
+    </div>
+    <input type="file" id="file-input" accept=".db">
+  </div>
+
+  <div class="state-msg error" id="error-msg"></div>
+  <div class="state-msg success" id="success-msg"></div>
+
+  <div class="panel" id="results-panel">
+    <div id="summary"></div>
+    <table id="players-table">
+      <thead>
+        <tr>
+          <th>Character / vehicle</th>
+          <th>Status</th>
+          <th>Coordinates</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="players-tbody"></tbody>
+    </table>
+
+    <div id="download-bar">
+      <div class="msg" id="download-msg"></div>
+      <button class="btn primary" id="download-btn">Download repaired players.db</button>
+    </div>
+  </div>
+
+  <details>
+    <summary>How this works</summary>
+    <p>Each character's or vehicle's position is stored twice: once in a table column that the server uses as a cache, and once inside a serialized data block that the game actually reads on load. A truck, trailer, or towing glitch can corrupt that second copy to <code>NaN</code> ("not a number") while leaving the table column untouched, nulled, or zeroed — the server then can't work out which map chunk to stream it into. For a character that means a black screen and an endless loading spinner; for a vehicle it just quietly vanishes, since it can no longer be placed in any chunk.</p>
+    <p>Vehicles (in <code>vehicles.db</code>) have one extra wrinkle: alongside <code>x</code>/<code>y</code>, there's a <code>wx</code>/<code>wy</code> pair marking which world chunk the vehicle belongs to. A corrupted vehicle typically shows <code>wx=0, wy=0</code> — the map's origin — rather than <code>NULL</code>. This tool computes <code>wx</code>/<code>wy</code> automatically from whatever coordinates you choose, so you don't need to work that out by hand.</p>
+    <p>This tool scans every character and vehicle for both flavors of this corruption, lets you pick a known-good location to move affected ones to (including matching a vehicle's spot to a character's, or vice versa), and patches every copy together so they all agree again.</p>
+  </details>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.min.js"></script>
+<script>
+(function () {
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+  const resultsPanel = document.getElementById('results-panel');
+  const summaryEl = document.getElementById('summary');
+  const tbody = document.getElementById('players-tbody');
+  const errorMsg = document.getElementById('error-msg');
+  const successMsg = document.getElementById('success-msg');
+  const downloadBar = document.getElementById('download-bar');
+  const downloadMsg = document.getElementById('download-msg');
+  const downloadBtn = document.getElementById('download-btn');
+
+  let SQLModule = null;
+  let db = null;
+  let rows = [];      // in-memory record of every character row across tables
+  let fixedCount = 0;
+  let originalName = 'players.db';
+
+  const sqlJsReady = initSqlJs({
+    locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/${file}`
+  }).then(SQL => { SQLModule = SQL; });
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) handleFile(fileInput.files[0]);
+  });
+
+  function resetState() {
+    errorMsg.style.display = 'none';
+    successMsg.style.display = 'none';
+    resultsPanel.style.display = 'none';
+    downloadBar.style.display = 'none';
+    tbody.innerHTML = '';
+    rows = [];
+    fixedCount = 0;
+  }
+
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.style.display = 'block';
+  }
+
+  async function handleFile(file) {
+    resetState();
+    originalName = file.name.replace(/\.db$/i, '') || 'players';
+    try {
+      await sqlJsReady;
+      const buf = await file.arrayBuffer();
+      db = new SQLModule.Database(new Uint8Array(buf));
+    } catch (e) {
+      showError('Could not open this file as a SQLite database. Make sure you selected the correct players.db or vehicles.db file.');
+      return;
+    }
+    loadTables();
+  }
+
+  function tableExists(name) {
+    const res = db.exec(`SELECT name FROM sqlite_master WHERE type='table' AND name='${name}'`);
+    return res.length > 0 && res[0].values.length > 0;
+  }
+
+  // A "profile" describes how to read/write one entity type: which table,
+  // how to get its display name, whether it has a z column, whether it
+  // has wx/wy chunk-index columns to derive, and the two-byte signature
+  // that marks the start of its serialized data block.
+  const PROFILES = [
+    { table: 'networkPlayers', nameCol: 'username', hasZ: true, hasWxWy: false, header: [1, 1], kind: 'character' },
+    { table: 'localPlayers', nameCol: 'name', hasZ: true, hasWxWy: false, header: [1, 1], kind: 'character' },
+    { table: 'vehicles', nameCol: null, hasZ: false, hasWxWy: true, header: [1, 33], kind: 'vehicle' }
+  ];
+
+  function loadTables() {
+    let found = false;
+    for (const profile of PROFILES) {
+      if (!tableExists(profile.table)) continue;
+      found = true;
+      const nameSelect = profile.nameCol ? `${profile.nameCol} AS charname, ` : '';
+      const wxwySelect = profile.hasWxWy ? 'wx, wy, ' : '';
+      const zSelect = profile.hasZ ? 'z, ' : '';
+      const res = db.exec(`SELECT id, ${nameSelect}${wxwySelect}x, y, ${zSelect}data FROM ${profile.table}`);
+      if (!res.length) continue;
+      const cols = res[0].columns;
+      for (const vals of res[0].values) {
+        const rec = {};
+        cols.forEach((c, i) => rec[c] = vals[i]);
+        rows.push(analyzeRow(profile, rec));
+      }
+    }
+
+    if (!found) {
+      showError("This doesn't look like a Project Zomboid players.db or vehicles.db file — none of the expected tables were found.");
+      return;
+    }
+    if (!rows.length) {
+      showError('No characters or vehicles found in this save file.');
+      return;
+    }
+
+    renderTable();
+  }
+
+  // Vehicles have no name column — their model/script id (e.g. "Base.69charger440")
+  // is reliably the first "Base.X" string inside the serialized data block.
+  function extractVehicleName(blob, id) {
+    if (!blob) return `Vehicle #${id}`;
+    const text = new TextDecoder('latin1').decode(blob);
+    const match = text.match(/Base\.[A-Za-z0-9_]+/);
+    return match ? match[0] : `Vehicle #${id}`;
+  }
+
+  function getFloat32BE(u8, offset) {
+    const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    return view.getFloat32(offset, false);
+  }
+
+  function setFloat32BE(u8, offset, value) {
+    const view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    view.setFloat32(offset, value, false);
+  }
+
+  function analyzeRow(profile, rec) {
+    const outerNull = (rec.x === null || rec.y === null);
+    const originVoid = profile.hasWxWy && rec.wx === 0 && rec.wy === 0 && (rec.x === null || rec.y === null || (rec.x === 0 && rec.y === 0));
+    let headerRecognized = false;
+    let blobNaN = false;
+    let blob = rec.data instanceof Uint8Array ? rec.data : null;
+
+    if (blob && blob.length >= 18 && blob[0] === profile.header[0] && blob[1] === profile.header[1]) {
+      headerRecognized = true;
+      const bx = getFloat32BE(blob, 10);
+      const by = getFloat32BE(blob, 14);
+      blobNaN = Number.isNaN(bx) || Number.isNaN(by);
+    }
+
+    const corrupted = outerNull || originVoid || (headerRecognized && blobNaN);
+    const name = profile.nameCol ? rec.charname : extractVehicleName(blob, rec.id);
+
+    return {
+      table: profile.table,
+      profile,
+      kind: profile.kind,
+      id: rec.id,
+      name,
+      x: rec.x,
+      y: rec.y,
+      z: profile.hasZ ? (rec.z === null ? 0 : rec.z) : null,
+      wx: profile.hasWxWy ? rec.wx : null,
+      wy: profile.hasWxWy ? rec.wy : null,
+      blob,
+      headerRecognized,
+      corrupted,
+      fixed: false
+    };
+  }
+
+  function fmtCoord(v) {
+    return v === null || v === undefined ? '—' : Number(v).toFixed(2);
+  }
+
+  function renderTable() {
+    resultsPanel.style.display = 'block';
+    renderSummary();
+    tbody.innerHTML = '';
+    rows
+      .slice()
+      .sort((a, b) => (b.corrupted - a.corrupted))
+      .forEach(row => renderRow(row));
+  }
+
+  function renderSummary() {
+    const bad = rows.filter(r => r.corrupted && !r.fixed).length;
+    const fixed = rows.filter(r => r.fixed).length;
+    const ok = rows.length - bad - fixed;
+    let parts = [];
+    if (bad) parts.push(`<span class="n-bad">${bad} corrupted</span>`);
+    if (fixed) parts.push(`<span class="n-ok">${fixed} fixed</span>`);
+    parts.push(`${ok} ok`);
+    summaryEl.innerHTML = `<strong>${originalName}.db</strong> — ${rows.length} ${rows.length === 1 ? 'entry' : 'entries'} — ${parts.join(', ')}`;
+  }
+
+  function renderRow(row) {
+    const tr = document.createElement('tr');
+    tr.className = 'row-main';
+
+    const nameTd = document.createElement('td');
+    nameTd.className = 'col-name';
+    nameTd.innerHTML = `${escapeHtml(row.name)}<span class="table-tag">${row.table}</span>`;
+    tr.appendChild(nameTd);
+
+    const statusTd = document.createElement('td');
+    const badge = document.createElement('span');
+    if (row.fixed) {
+      badge.className = 'badge fixed';
+      badge.textContent = 'FIXED';
+    } else if (row.corrupted) {
+      badge.className = 'badge bad';
+      badge.textContent = 'CORRUPTED';
+    } else {
+      badge.className = 'badge ok';
+      badge.textContent = 'OK';
+    }
+    statusTd.appendChild(badge);
+    tr.appendChild(statusTd);
+
+    const coordsTd = document.createElement('td');
+    coordsTd.className = 'col-coords';
+    const mainCoords = row.z !== null
+      ? `${fmtCoord(row.x)}, ${fmtCoord(row.y)}, ${fmtCoord(row.z)}`
+      : `${fmtCoord(row.x)}, ${fmtCoord(row.y)}`;
+    let coordsHtml = mainCoords;
+    if (row.wx !== null) {
+      coordsHtml += `<span class="table-tag">chunk ${row.wx}, ${row.wy}</span>`;
+    }
+    coordsTd.innerHTML = coordsHtml;
+    tr.appendChild(coordsTd);
+
+    const actionTd = document.createElement('td');
+    if (row.corrupted && !row.fixed) {
+      const btn = document.createElement('button');
+      btn.className = 'btn';
+      btn.textContent = 'Repair';
+      btn.addEventListener('click', () => toggleFixRow(row, tr, fixRow));
+      actionTd.appendChild(btn);
+    }
+    tr.appendChild(actionTd);
+
+    tbody.appendChild(tr);
+  }
+
+  function toggleFixRow(row, tr) {
+    const existing = tr.nextElementSibling;
+    if (existing && existing.classList.contains('row-fix')) {
+      existing.remove();
+      return;
+    }
+    // close any other open fix rows
+    document.querySelectorAll('tr.row-fix').forEach(el => el.remove());
+
+    const fixTr = document.createElement('tr');
+    fixTr.className = 'row-fix';
+    const td = document.createElement('td');
+    td.colSpan = 4;
+
+    const healthy = rows.filter(r => !r.corrupted || r.fixed);
+
+    const box = document.createElement('div');
+    box.className = 'fix-box';
+
+    const selField = document.createElement('div');
+    selField.className = 'field';
+    const selLabel = document.createElement('label');
+    selLabel.textContent = 'Move to:';
+    const select = document.createElement('select');
+    healthy.forEach(h => {
+      const opt = document.createElement('option');
+      opt.value = h.id + '|' + h.table;
+      const kindLabel = h.kind === 'vehicle' ? 'vehicle' : 'character';
+      opt.textContent = `${h.name} — ${kindLabel} (${fmtCoord(h.x)}, ${fmtCoord(h.y)})`;
+      select.appendChild(opt);
+    });
+    const customOpt = document.createElement('option');
+    customOpt.value = 'custom';
+    customOpt.textContent = 'Custom coordinates…';
+    select.appendChild(customOpt);
+    selField.appendChild(selLabel);
+    selField.appendChild(select);
+    box.appendChild(selField);
+
+    const customWrap = document.createElement('div');
+    customWrap.className = 'custom-coords';
+
+    const xField = document.createElement('div');
+    xField.className = 'field';
+    xField.innerHTML = '<label>X</label>';
+    const xInput = document.createElement('input');
+    xInput.type = 'number';
+    xInput.step = 'any';
+    xField.appendChild(xInput);
+
+    const yField = document.createElement('div');
+    yField.className = 'field';
+    yField.innerHTML = '<label>Y</label>';
+    const yInput = document.createElement('input');
+    yInput.type = 'number';
+    yInput.step = 'any';
+    yField.appendChild(yInput);
+
+    customWrap.appendChild(xField);
+    customWrap.appendChild(yField);
+    box.appendChild(customWrap);
+
+    select.addEventListener('change', () => {
+      customWrap.classList.toggle('visible', select.value === 'custom');
+    });
+    if (!healthy.length) {
+      customWrap.classList.add('visible');
+    }
+
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'btn primary';
+    applyBtn.textContent = 'Apply fix';
+    applyBtn.addEventListener('click', () => {
+      let targetX, targetY;
+      if (select.value === 'custom' || !healthy.length) {
+        targetX = parseFloat(xInput.value);
+        targetY = parseFloat(yInput.value);
+        if (Number.isNaN(targetX) || Number.isNaN(targetY)) {
+          xInput.style.borderColor = 'var(--bad)';
+          yInput.style.borderColor = 'var(--bad)';
+          return;
+        }
+      } else {
+        const [idStr, table] = select.value.split('|');
+        const source = rows.find(r => String(r.id) === idStr && r.table === table);
+        targetX = source.x;
+        targetY = source.y;
+      }
+      fixRow(row, targetX, targetY);
+      fixTr.remove();
+      renderTable();
+    });
+    box.appendChild(applyBtn);
+
+    td.appendChild(box);
+    fixTr.appendChild(td);
+    tr.parentNode.insertBefore(fixTr, tr.nextSibling);
+  }
+
+  function fixRow(row, targetX, targetY) {
+    let newBlob = row.blob;
+
+    if (row.headerRecognized) {
+      newBlob = new Uint8Array(row.blob); // copy
+      setFloat32BE(newBlob, 10, targetX);
+      setFloat32BE(newBlob, 14, targetY);
+    }
+
+    // Build the SET clause and params to match exactly the columns this
+    // entity type actually has — vehicles have wx/wy but no z; characters
+    // have z but no wx/wy.
+    const setParts = ['x=?', 'y=?'];
+    const params = [targetX, targetY];
+
+    if (row.profile.hasZ) {
+      setParts.push('z=?');
+      params.push(0.0);
+    }
+
+    if (row.profile.hasWxWy) {
+      // Vehicles are bucketed into 8x8-tile world chunks; wx/wy is just
+      // the tile position divided down into that bucket.
+      const targetWx = Math.floor(targetX / 8);
+      const targetWy = Math.floor(targetY / 8);
+      setParts.push('wx=?', 'wy=?');
+      params.push(targetWx, targetWy);
+      row.wx = targetWx;
+      row.wy = targetWy;
+    }
+
+    if (row.headerRecognized) {
+      setParts.push('data=?');
+      params.push(newBlob);
+    }
+
+    params.push(row.id);
+    db.run(`UPDATE ${row.table} SET ${setParts.join(', ')} WHERE id=?`, params);
+
+    row.x = targetX;
+    row.y = targetY;
+    if (row.profile.hasZ) row.z = 0.0;
+    row.blob = newBlob;
+    row.corrupted = false;
+    row.fixed = true;
+    fixedCount++;
+
+    downloadBar.style.display = 'flex';
+    downloadMsg.textContent = `${fixedCount} ${fixedCount === 1 ? 'entry' : 'entries'} repaired, ready to download.`;
+  }
+
+  downloadBtn.addEventListener('click', () => {
+    const data = db.export();
+    const blob = new Blob([data], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${originalName}-repaired.db`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+  }
+})();
+</script>
+</body>
+</html>
