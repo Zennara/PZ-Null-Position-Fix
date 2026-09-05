@@ -318,8 +318,8 @@
 <body>
 <div class="wrap">
 
-  <h1>Position Repair</h1>
-  <p class="subtitle">Fixes the corrupted-position bug that causes a black screen and endless "loading the world" — or a vehicle that's vanished from the map — after a vehicle or trailer glitch in Project Zomboid.</p>
+  <h1>Position & Physics Repair</h1>
+  <p class="subtitle">Fixes the corrupted-position bug that causes a black screen and endless "loading the world" — or a vehicle that's vanished from the map, or won't reappear even after its position is fixed — after a vehicle or trailer glitch in Project Zomboid.</p>
   <div class="privacy-note">Runs entirely in your browser. Your save file is read locally and never sent anywhere — this page works fine with no internet connection once it's loaded.</div>
 
   <div class="panel">
@@ -358,7 +358,8 @@
     <summary>How this works</summary>
     <p>Each character's or vehicle's position is stored twice: once in a table column that the server uses as a cache, and once inside a serialized data block that the game actually reads on load. A truck, trailer, or towing glitch can corrupt that second copy to <code>NaN</code> ("not a number") while leaving the table column untouched, nulled, or zeroed — the server then can't work out which map chunk to stream it into. For a character that means a black screen and an endless loading spinner; for a vehicle it just quietly vanishes, since it can no longer be placed in any chunk.</p>
     <p>Vehicles (in <code>vehicles.db</code>) have one extra wrinkle: alongside <code>x</code>/<code>y</code>, there's a <code>wx</code>/<code>wy</code> pair marking which world chunk the vehicle belongs to. A corrupted vehicle typically shows <code>wx=0, wy=0</code> — the map's origin — rather than <code>NULL</code>. This tool computes <code>wx</code>/<code>wy</code> automatically from whatever coordinates you choose, so you don't need to work that out by hand.</p>
-    <p>This tool scans every character and vehicle for both flavors of this corruption, lets you pick a known-good location to move affected ones to (including matching a vehicle's spot to a character's, or vice versa), and patches every copy together so they all agree again.</p>
+    <p>Some towing/trailer glitches go further than position — they can also scramble a fixed-size rotation/physics block inside a vehicle's data, and occasionally scatter smaller pockets of the same corruption deeper into its parts or cargo data. A vehicle with this problem can have a perfectly valid position and still refuse to spawn, or a position fix alone can leave it invisible. This tool scans for that too, tagged separately as "physics data corrupted." Where possible it repairs the fixed block by copying it from another healthy vehicle of the exact same model already in the file; anything deeper that can't be matched against a known-good donor gets zeroed out instead of left unreadable.</p>
+    <p>This tool scans every character and vehicle for all of these corruption types, lets you pick a known-good location to move affected ones to (including matching a vehicle's spot to a character's, or vice versa), and patches every copy together so they all agree again.</p>
   </details>
 
 </div>
@@ -492,6 +493,98 @@
     view.setFloat32(offset, value, false);
   }
 
+  // A truck/trailer towing glitch can also scramble a fixed-offset
+  // rotation/physics block just past the position floats — and, in
+  // worse cases, scatter more corruption deeper into the vehicle's
+  // parts/cargo data. Both show up as the big-endian NaN byte pattern
+  // 0xFFC00000, but unlike the position floats it isn't 4-byte aligned
+  // to a fixed offset, so this scans raw bytes rather than fixed fields.
+  const NAN_B0 = 0xFF, NAN_B1 = 0xC0, NAN_B2 = 0x00, NAN_B3 = 0x00;
+
+  function findNaNSpans(blob, fromOffset) {
+    const spans = [];
+    if (!blob) return spans;
+    for (let i = fromOffset; i <= blob.length - 4; i++) {
+      if (blob[i] === NAN_B0 && blob[i + 1] === NAN_B1 && blob[i + 2] === NAN_B2 && blob[i + 3] === NAN_B3) {
+        spans.push(i);
+      }
+    }
+    return spans;
+  }
+
+  // Groups NaN span offsets into contiguous runs (each 4 bytes apart).
+  // The physics block corrupted by the towing glitch shows up as one
+  // run of several adjacent 4-byte NaN chunks right after the position
+  // fields; anything deeper in the blob tends to be separate runs.
+  function groupSpans(spans) {
+    if (!spans.length) return [];
+    const runs = [[spans[0]]];
+    for (let i = 1; i < spans.length; i++) {
+      const current = runs[runs.length - 1];
+      if (spans[i] === current[current.length - 1] + 4) {
+        current.push(spans[i]);
+      } else {
+        runs.push([spans[i]]);
+      }
+    }
+    return runs;
+  }
+
+  // Finds another vehicle in this same file with the exact same model
+  // script (e.g. "Base.PickUpTruck") whose blob has no NaN corruption
+  // at all — a safe donor to splice a clean physics block from.
+  function findVehicleDonor(row) {
+    const donorRow = rows.find(r =>
+      r.kind === 'vehicle' &&
+      r.id !== row.id &&
+      r.table === row.table &&
+      r.name === row.name &&
+      r.headerRecognized &&
+      r.blob &&
+      findNaNSpans(r.blob, 18).length === 0
+    );
+    return donorRow ? donorRow.blob : null;
+  }
+
+  // The confirmed fixed-size rotation/physics block sits right after the
+  // position floats, ending just before the vehicle-type string begins.
+  // Only a corrupted run that falls entirely inside this known-safe
+  // window gets donor-spliced — a run outside it is inside variable-
+  // length cargo/parts data whose layout differs per vehicle instance,
+  // so splicing a donor's bytes there would be a guess, not a fix.
+  const PHYSICS_BLOCK_END = 50;
+
+  // Repairs physics/parts-block corruption in a vehicle blob. Any
+  // corrupted run fully inside the fixed header window is spliced in
+  // from a same-model donor if one's available; every other run —
+  // typically deeper, instance-specific cargo/parts data with no
+  // reliable donor structure to match — is zero-filled instead of
+  // left as NaN.
+  function repairVehiclePhysics(blob, row) {
+    const spans = findNaNSpans(blob, 18);
+    if (!spans.length) return { blob, donorUsed: false, spansFound: 0 };
+
+    const out = new Uint8Array(blob);
+    const runs = groupSpans(spans);
+    let donorUsed = false;
+    const donorBlob = findVehicleDonor(row);
+
+    runs.forEach(run => {
+      const start = run[0];
+      const end = run[run.length - 1] + 4;
+      if (donorBlob && end <= PHYSICS_BLOCK_END && donorBlob.length >= end) {
+        out.set(donorBlob.subarray(start, end), start);
+        donorUsed = true;
+      } else {
+        run.forEach(offset => {
+          out[offset] = 0; out[offset + 1] = 0; out[offset + 2] = 0; out[offset + 3] = 0;
+        });
+      }
+    });
+
+    return { blob: out, donorUsed, spansFound: spans.length };
+  }
+
   function analyzeRow(profile, rec) {
     const outerNull = (rec.x === null || rec.y === null);
     const originVoid = profile.hasWxWy && rec.wx === 0 && rec.wy === 0 && (rec.x === null || rec.y === null || (rec.x === 0 && rec.y === 0));
@@ -506,7 +599,17 @@
       blobNaN = Number.isNaN(bx) || Number.isNaN(by);
     }
 
-    const corrupted = outerNull || originVoid || (headerRecognized && blobNaN);
+    const positionCorrupted = outerNull || originVoid || (headerRecognized && blobNaN);
+
+    // Physics/parts-block corruption is a separate failure mode from
+    // position, confirmed so far only in vehicles.db blobs — a vehicle
+    // can have this and still show a perfectly valid x/y, so it's
+    // checked independently rather than folded into positionCorrupted.
+    const physicsCorrupted = profile.kind === 'vehicle' && headerRecognized && blob.length > 18
+      ? findNaNSpans(blob, 18).length > 0
+      : false;
+
+    const corrupted = positionCorrupted || physicsCorrupted;
     const name = profile.nameCol ? rec.charname : extractVehicleName(blob, rec.id);
 
     return {
@@ -522,6 +625,8 @@
       wy: profile.hasWxWy ? rec.wy : null,
       blob,
       headerRecognized,
+      positionCorrupted,
+      physicsCorrupted,
       corrupted,
       fixed: false
     };
@@ -558,7 +663,11 @@
 
     const nameTd = document.createElement('td');
     nameTd.className = 'col-name';
-    nameTd.innerHTML = `${escapeHtml(row.name)}<span class="table-tag">${row.table}</span>`;
+    let tag = row.table;
+    if (!row.fixed && row.physicsCorrupted) {
+      tag += row.positionCorrupted ? ' • physics corrupted too' : ' • physics data corrupted';
+    }
+    nameTd.innerHTML = `${escapeHtml(row.name)}<span class="table-tag">${escapeHtml(tag)}</span>`;
     tr.appendChild(nameTd);
 
     const statusTd = document.createElement('td');
@@ -592,8 +701,18 @@
     if (row.corrupted && !row.fixed) {
       const btn = document.createElement('button');
       btn.className = 'btn';
-      btn.textContent = 'Repair';
-      btn.addEventListener('click', () => toggleFixRow(row, tr, fixRow));
+      if (row.positionCorrupted) {
+        // Needs a destination — open the location-picker form. Any
+        // physics-block corruption on this row gets cleaned up as part
+        // of the same write, once a target location is chosen.
+        btn.textContent = 'Repair';
+        btn.addEventListener('click', () => toggleFixRow(row, tr));
+      } else {
+        // Position is already fine — nothing to pick, just clean the
+        // physics/parts data in place at its current location.
+        btn.textContent = 'Fix physics data';
+        btn.addEventListener('click', () => fixPhysicsOnly(row));
+      }
       actionTd.appendChild(btn);
     }
     tr.appendChild(actionTd);
@@ -707,6 +826,13 @@
       newBlob = new Uint8Array(row.blob); // copy
       setFloat32BE(newBlob, 10, targetX);
       setFloat32BE(newBlob, 14, targetY);
+
+      // Clean up any physics/parts-block corruption on this row while
+      // we already have the blob open for the position write.
+      if (row.kind === 'vehicle') {
+        const result = repairVehiclePhysics(newBlob, row);
+        newBlob = result.blob;
+      }
     }
 
     // Build the SET clause and params to match exactly the columns this
@@ -743,12 +869,31 @@
     row.y = targetY;
     if (row.profile.hasZ) row.z = 0.0;
     row.blob = newBlob;
+    row.positionCorrupted = false;
+    row.physicsCorrupted = false;
     row.corrupted = false;
     row.fixed = true;
     fixedCount++;
 
     downloadBar.style.display = 'flex';
     downloadMsg.textContent = `${fixedCount} ${fixedCount === 1 ? 'entry' : 'entries'} repaired, ready to download.`;
+  }
+
+  // For a vehicle whose position is already fine but whose physics/parts
+  // data is corrupted — no location to pick, just patch the blob in place.
+  function fixPhysicsOnly(row) {
+    const result = repairVehiclePhysics(row.blob, row);
+    db.run(`UPDATE ${row.table} SET data=? WHERE id=?`, [result.blob, row.id]);
+
+    row.blob = result.blob;
+    row.physicsCorrupted = false;
+    row.corrupted = false;
+    row.fixed = true;
+    fixedCount++;
+
+    downloadBar.style.display = 'flex';
+    downloadMsg.textContent = `${fixedCount} ${fixedCount === 1 ? 'entry' : 'entries'} repaired, ready to download.`;
+    renderTable();
   }
 
   downloadBtn.addEventListener('click', () => {
